@@ -30,6 +30,7 @@ import org.opencommercesearch.common.Context
 import org.opencommercesearch.search.Element
 import org.opencommercesearch.search.collector.Collector
 import org.apache.commons.lang3.StringUtils
+import play.api.Logger
 
 /**
  * Suggests any type of element. By default, it only uses the catalog suggester. Other suggesters
@@ -60,8 +61,18 @@ class MultiSuggester extends Suggester[Element] {
   def initConfigSuggesters() : Seq[Suggester[Element]] = {
     val suggestersFromConfig = Play.current.configuration.getString("suggester.extra").getOrElse(StringUtils.EMPTY)
     val suggesterNames = StringUtils.split(suggestersFromConfig, ",").toSeq
-    suggesterNames map { suggesterName =>
-      Class.forName(suggesterName).newInstance().asInstanceOf[Suggester[Element]]
+
+    try {
+      suggesterNames map {
+        suggesterName =>
+          Class.forName(suggesterName).newInstance().asInstanceOf[Suggester[Element]]
+      }
+    }
+    catch {
+      case e: Exception => {
+        Logger.error("Can't initialize extra suggesters from configuration.", e)
+        Seq.empty[Suggester[Element]]
+      }
     }
   }
 
