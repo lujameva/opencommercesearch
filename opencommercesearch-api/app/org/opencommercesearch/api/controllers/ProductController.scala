@@ -192,7 +192,7 @@ object ProductController extends BaseController {
    * @param groupSummary returned by Solr
    * @return an array for products containing its summary
    */
-  private def processGroupSummary(groupSummary: NamedList[Object]) : JsArray = {
+  private def processGroupSummary(groupSummary: NamedList[Object]) : Seq[JsObject] = {
     val groups = ArrayBuffer[JsObject]()
     if(groupSummary != null) {
       val productSummaries = groupSummary.get("productId").asInstanceOf[NamedList[Object]]
@@ -212,7 +212,7 @@ object ProductController extends BaseController {
        })
       }
     }
-    new JsArray(groups)
+    groups
   }
 
 
