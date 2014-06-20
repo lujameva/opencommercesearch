@@ -214,4 +214,6 @@ public class DefaultProduct {
   public void setSummary(ProductSummary summary) {
     this.summary = summary;
   }
+
+
 }

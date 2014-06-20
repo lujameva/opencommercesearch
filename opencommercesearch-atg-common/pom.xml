@@ -91,6 +91,12 @@
       </dependency>
 
       <dependency>
+        <groupId>org.opencommercesearch</groupId>
+        <artifactId>opencommercesearch-sdk-java</artifactId>
+        <version>${opencommercesearch.version}</version>
+      </dependency>
+
+      <dependency>
       	<groupId>org.healthonnet.lucene</groupId>
       	<artifactId>hon-lucene-synonyms</artifactId>
       	<version>${lucene.synonyms}</version>
