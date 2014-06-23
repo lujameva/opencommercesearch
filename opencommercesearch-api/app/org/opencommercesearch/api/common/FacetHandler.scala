@@ -97,13 +97,15 @@ case class FacetHandler (
         for(facetId <- f.id) { facetBlackList = facetBlackLists(facetId) }
 
         for (count <- facetField.getValues) {
-          val filterName: String = getCountName(count, prefix)
+          var filterName: String = getCountName(count, prefix)
           if (facetBlackList == null || !facetBlackList.contains(filterName)) {
-            val filter = new Filter(Some(filterName), Some(count.getCount),
+
+            val filter = new Filter(Some(getCategoryFilter(f.getName, filterName)), Some(count.getCount),
               Some(URLEncoder.encode(getCountPath(count, f, filterQueries), "UTF-8")),
               Some(URLEncoder.encode(count.getAsFilterQuery, "UTF-8")),
               None
             )
+
             filter.setSelected(count.getFacetField.getName, filterName, filterQueries)
             filters.append(filter)
           }
@@ -159,6 +161,26 @@ case class FacetHandler (
     return sortedFacets*/
   }
 
+  /**
+   * Extracts the category name from the given filter if the facet name is category.
+   * @param facetName The facet name.
+   * @param filter The filter name to substring.
+   * @return The category name if facet name is category, the unmodified filter otherwise.
+   */
+  private def getCategoryFilter(facetName: String, filter : String) : String = {
+    facetName match {
+      case "category" =>
+        val index = filter.lastIndexOf(".")
+        index match {
+          case i if i > 0 && i < filter.length - 1 =>
+            filter.substring(index + 1)
+          case _ =>
+            filter
+        }
+      case _ =>
+        filter
+    }
+  }
   private def rangeFacets(facetMap: mutable.Map[String, Facet]) : Unit = {
     if (queryResponse.getFacetRanges != null) {
       for (range <- queryResponse.getFacetRanges) {
