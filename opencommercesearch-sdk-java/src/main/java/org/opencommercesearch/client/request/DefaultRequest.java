@@ -49,11 +49,21 @@ public abstract class DefaultRequest implements Request {
    * @param value The new value to add
    */
   public void addParam(String name, String value) {
+	  addParam(name, value, ",");
+  }
+  
+  /**
+   * Adds a param value to an existing value with a custom separator
+   *
+   * @param name  The name of the param
+   * @param value The new value to add
+   */
+  public void addParam(String name, String value, String separator) {
     String currentValue = getParam(name);
     if (currentValue == null) {
       setParam(name, value);
     } else if (value != null) {
-      setParam(name, currentValue + "," + value);
+      setParam(name, currentValue + separator + value);
     }
   }
 

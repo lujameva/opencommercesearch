@@ -429,7 +429,7 @@ public class ProductApiTest {
 
         assertNotNull(request);
         assertEquals("GET", request.getMethod().getName());
-        assertEquals("http://localhost:9000/v1/products?preview=false&q=some+query&fields=field1%2Cfield2&filterQueries=country%3Aus%2Cprice%3A%5B300+TO+400%5D&offset=0&limit=10&outlet=false&sort=price+asc%2C+discount+desc&site=testSite",
+        assertEquals("http://localhost:9000/v1/products?preview=false&q=some+query&fields=field1%2Cfield2&filterQueries=country%3Aus%7Cprice%3A%5B300+TO+400%5D&offset=0&limit=10&outlet=false&sort=price+asc%2C+discount+desc&site=testSite",
                 request.getResourceRef().toString());
     }
 
