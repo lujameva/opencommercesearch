@@ -315,8 +315,9 @@ public class ProductApi {
    * @param url     The URL for the HTTP request.
    * @param request The actual parameters to be included in the Restlet request.
    * @return A new Restlet request with the given URL and parameters set.
+   * @throws ProductApiException 
    */
-  org.restlet.Request convertToRestlet(String url, Request request) {
+  org.restlet.Request convertToRestlet(String url, Request request) throws ProductApiException {
     switch (request.getMethod()) {
       case GET:
         return new org.restlet.Request(Method.GET, url + "&" + request.getQueryString());
