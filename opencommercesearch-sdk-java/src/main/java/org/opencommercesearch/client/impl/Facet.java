@@ -21,6 +21,8 @@ package org.opencommercesearch.client.impl;
 
 import org.opencommercesearch.FilterQuery;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -208,7 +210,8 @@ public class Facet {
         private long count;
         private String filterQuery;
         private String filterQueries;
-        private boolean isSelected;
+        
+        private boolean selected;
 
         public String getName() {
             return name;
@@ -243,11 +246,11 @@ public class Facet {
         }
 
         public boolean isSelected() {
-            return isSelected;
+            return selected;
         }
-
-        public void setSelected(boolean isSelected) {
-            this.isSelected = isSelected;
+        
+        public void setIsSelected(boolean selected) {
+            this.selected = selected;
         }
 
         @Deprecated
@@ -255,7 +258,7 @@ public class Facet {
             if (filterQueries != null) {
                 for (FilterQuery query : filterQueries) {
                     if (query.getFieldName().equals(fieldName) && query.getUnescapeExpression().equals(FilterQuery.unescapeQueryChars(expression))) {
-                        setSelected(true);
+                        setIsSelected(true);
                         break;
                     }
                 }

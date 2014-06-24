@@ -410,7 +410,7 @@ public class ProductApiTest {
     }
 
     @Test
-    public void testGetHttpRequest() throws IOException {
+    public void testGetHttpRequest() throws IOException, ProductApiException {
         SearchRequest sr = new SearchRequest();
         sr.setQuery("some query");
         sr.addField("field1");
@@ -429,7 +429,7 @@ public class ProductApiTest {
 
         assertNotNull(request);
         assertEquals("GET", request.getMethod().getName());
-        assertEquals("http://localhost:9000/v1/products?preview=false&q=some%20query&fields=field1,field2&filterQueries=country:us,price:[300%20TO%20400]&offset=0&limit=10&outlet=false&sort=price%20asc,%20discount%20desc&site=testSite",
+        assertEquals("http://localhost:9000/v1/products?preview=false&q=some+query&fields=field1%2Cfield2&filterQueries=country%3Aus%2Cprice%3A%5B300+TO+400%5D&offset=0&limit=10&outlet=false&sort=price+asc%2C+discount+desc&site=testSite",
                 request.getResourceRef().toString());
     }
 

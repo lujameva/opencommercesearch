@@ -1,7 +1,10 @@
 package org.opencommercesearch.client.request;
 
 import org.apache.commons.lang.StringUtils;
+import org.opencommercesearch.client.ProductApiException;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -58,8 +61,9 @@ public abstract class DefaultRequest implements Request {
    * Converts this request to a valid query string.
    *
    * @return A query string conformed of all parameters stored in this request.
+   * @throws UnsupportedEncodingException 
    */
-  public String getQueryString() {
+  public String getQueryString() throws ProductApiException {
     if (params.isEmpty()) {
       return StringUtils.EMPTY;
     }
@@ -72,7 +76,12 @@ public abstract class DefaultRequest implements Request {
       if (paramValue != null) {
         queryString.append(paramName);
         queryString.append("=");
-        queryString.append(params.get(paramName));
+        try {
+            queryString.append(URLEncoder.encode(params.get(paramName), "UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+            throw new ProductApiException("Error encoding parameter: " + paramName 
+                                          + " with value: " + params.get(paramName), e);
+        }
         queryString.append("&");
       }
     }

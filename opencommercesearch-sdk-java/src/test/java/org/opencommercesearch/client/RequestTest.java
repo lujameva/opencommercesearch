@@ -30,7 +30,7 @@ import static org.junit.Assert.assertEquals;
 public class RequestTest {
 
   @Test
-  public void testGetHttpRequest() {
+  public void testGetHttpRequest() throws ProductApiException {
     DefaultRequest ar = new DefaultRequest() {
 
       @Override
@@ -49,7 +49,7 @@ public class RequestTest {
     ar.addParam("param1", "v12");
 
     String queryString = ar.getQueryString();
-    assertEquals("param1=v11,v12&param2=v21", queryString);
+    assertEquals("param1=v11%2Cv12&param2=v21", queryString);
 
     ar.setParam("param1", "v13");
     queryString = ar.getQueryString();
