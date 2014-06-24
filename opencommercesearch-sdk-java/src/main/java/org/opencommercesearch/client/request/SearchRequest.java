@@ -31,6 +31,8 @@ import org.opencommercesearch.client.ProductApi;
  */
 public class SearchRequest extends DefaultRequest {
 
+  public static final String FILTER_QUERY_SEPARATOR = "|";
+
   public void setQuery(String query) {
     setParam("q", query);
   }
@@ -64,7 +66,7 @@ public class SearchRequest extends DefaultRequest {
   }
 
   public void addFilterQuery(String filterQuery) {
-    addParam("filterQueries", filterQuery);
+    addParam("filterQueries", filterQuery, FILTER_QUERY_SEPARATOR);
   }
 
   public void setFilterQueries(String[] filterQueries) {
@@ -72,7 +74,7 @@ public class SearchRequest extends DefaultRequest {
       throw new NullPointerException("filterQueries");
     }
 
-    setParam("filterQueries", StringUtils.join(filterQueries, ","));
+    setParam("filterQueries", StringUtils.join(filterQueries, FILTER_QUERY_SEPARATOR));
   }
 
   public void setSort(String sort) {
