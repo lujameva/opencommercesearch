@@ -30,38 +30,41 @@ import org.opencommercesearch.client.impl.Metadata;
  * @author jmendez
  */
 public class SearchResponse extends DefaultResponse {
-  private Metadata metadata;
-  private DefaultProduct[] products;
-  private boolean boundSummaries = false;
+    private Metadata metadata;
+    private DefaultProduct[] products;
+    private boolean boundSummaries = false;
 
-  public Metadata getMetadata() {
-    return metadata;
-  }
-
-  protected void setMetadata(Metadata metadata) {
-    this.metadata = metadata;
-  }
-
-  public DefaultProduct[] getProducts() {
-    if (!boundSummaries) {
-      bindSummaries();
+    public Metadata getMetadata() {
+        return metadata;
     }
 
-    return products;
-  }
-
-  protected void setProducts(DefaultProduct[] products) {
-    this.products = products;
-  }
-
-  /**
-   * Adds to each product in the response, its corresponding product summary information.
-   */
-  private void bindSummaries() {
-    JsonNode summaries = metadata.getProductSummary();
-    for (DefaultProduct product : products) {
-      DefaultProductSummary productSummary = new DefaultProductSummary(summaries.get(product.getId()));
-      product.setSummary(productSummary);
+    protected void setMetadata(Metadata metadata) {
+        this.metadata = metadata;
     }
-  }
+
+    public DefaultProduct[] getProducts() {
+        if (!boundSummaries) {
+            bindSummaries();
+        }
+
+        return products;
+    }
+
+    protected void setProducts(DefaultProduct[] products) {
+        this.products = products;
+    }
+
+    /**
+     * Adds to each product in the response, its corresponding product summary information.
+     */
+    private void bindSummaries() {
+        JsonNode summaries = metadata.getProductSummary();
+
+        if (products != null) {
+            for (DefaultProduct product : products) {
+                DefaultProductSummary productSummary = new DefaultProductSummary(summaries.get(product.getId()));
+                product.setSummary(productSummary);
+            }
+        }
+    }
 }

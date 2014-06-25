@@ -20,7 +20,6 @@ package org.opencommercesearch.client.impl;
 */
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-
 import org.opencommercesearch.client.Product;
 import org.opencommercesearch.client.ProductSummary;
 
