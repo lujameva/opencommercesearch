@@ -21,18 +21,18 @@ import play.api.Play
  *
  * @author rmerizalde
  */
-sealed class ProductQuery(q: String, site: String)(implicit context: Context, request: Request[AnyContent]) extends SolrQuery(q) {
+sealed class ProductQuery(q: String, site: String = null)(implicit context: Context, request: Request[AnyContent] = null) extends SolrQuery(q) {
   import Collection._
   import Query._
 
   private var _filterQueries: Array[FilterQuery] = null
-  private var closeoutSites: Set[String] = Play.current.configuration.getString("sites.closeout").getOrElse("").split(",").toSet
+  private val closeoutSites: Set[String] = Play.current.configuration.getString("sites.closeout").getOrElse("").split(",").toSet
   
   protected def init() : Unit = {
     setFields("id")
     setParam("collection", searchCollection.name(context.lang))
 
-    if (closeoutSites.contains(site)) {
+    if (site == null || closeoutSites.contains(site)) {
       addFilterQuery("isRetail:true")
     }
 
@@ -55,8 +55,14 @@ sealed class ProductQuery(q: String, site: String)(implicit context: Context, re
     var offset = 0
     var limit = DefaultPaginationLimit
 
-    for (o <- request.getQueryString("offset")) { offset = o.toInt }
-    for (l <- request.getQueryString("limit")) { limit = l.toInt }
+    if(request != null) {
+      for (o <- request.getQueryString("offset")) {
+        offset = o.toInt
+      }
+      for (l <- request.getQueryString("limit")) {
+        limit = l.toInt
+      }
+    }
 
     withPagination(offset, limit)
   }
@@ -80,7 +86,8 @@ sealed class ProductQuery(q: String, site: String)(implicit context: Context, re
   }
 
   def withSorting() : ProductQuery = {
-    val sortParam = URLDecoder.decode(request.getQueryString("sort").getOrElse(""), "UTF-8")
+    val encodedSortParam = if(request != null) request.getQueryString("sort").getOrElse("") else ""
+    val sortParam = URLDecoder.decode(encodedSortParam, "UTF-8")
     val sortSpecs = StringUtils.split(sortParam, ",")
     if (sortSpecs != null && sortSpecs.length > 0) {
       val country = context.lang.country

@@ -19,6 +19,10 @@ package org.opencommercesearch.search.suggester
 * under the License.
 */
 
+import play.api.mvc.{AnyContent, Request}
+
+import org.opencommercesearch.api.ProductQuery
+
 import org.apache.solr.client.solrj.SolrQuery
 import org.opencommercesearch.api.Collection._
 import org.opencommercesearch.api.controllers.BrandController._
@@ -56,11 +60,11 @@ trait IndexableElement extends Element {
    */
   def toSolrDoc(feedTimestamp: Long, count: Int = 1) : SolrInputDocument = {
     val doc = new SolrInputDocument()
-    val elementType = getType
-    doc.addField("id", getSuggestionId(elementType,  id.get))
+    val `type` = getType
+    doc.addField("id", getSuggestionId(`type`,  id.get))
     doc.addField("userQuery", StringUtils.EMPTY)
     doc.addField("ngrams", getNgramText)
-    doc.addField("type", elementType)
+    doc.addField("type", `type`)
     doc.addField("feedTimestamp", feedTimestamp)
     doc.addField("count", count)
     doc.addField("lastUpdated", IsoDateFormat.get().format(new Date()))
@@ -137,13 +141,8 @@ object IndexableElement {
 
     val docsToIndex = elements map { e =>
       if(fetchCount) {
-        val productQuery = new SolrQuery(getQuery(e))
-
-        productQuery.addFilterQuery("isRetail:true")
-        productQuery.addFilterQuery(s"country:${context.lang.country}")
+        val productQuery = new ProductQuery(getQuery(e))
         productQuery.addFilterQuery("isToos:false")
-        productQuery.setParam("collection", searchCollection.name(context.lang))
-
         productQuery.setRows(0)
         val responseFuture = solrServer.query(productQuery)
 
