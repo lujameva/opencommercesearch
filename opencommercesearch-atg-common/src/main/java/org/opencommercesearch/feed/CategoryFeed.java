@@ -19,6 +19,7 @@ package org.opencommercesearch.feed;
 * under the License.
 */
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -39,6 +40,10 @@ import atg.repository.RepositoryException;
 import atg.repository.RepositoryItem;
 
 import com.google.common.collect.Iterables;
+import org.restlet.Request;
+import org.restlet.Response;
+import org.restlet.data.Method;
+import org.restlet.data.Status;
 
 /**
  * A feed for categories.
@@ -145,6 +150,43 @@ public class CategoryFeed extends BaseRestFeed {
         }
     }
 
+    @Override
+    protected void sendDeleteByQuery() throws IOException {
+        //Do nothing
+    }
+
+    @Override
+    protected void sendDelete(long feedTimestamp) {
+        //Do nothing
+    }
+
+    @Override
+    protected void sendRollback() throws IOException {
+        //Do nothing
+    }
+
+    @Override
+    protected void sendCommit() throws IOException {
+        String commitEndpointUrl = productService.getUrl4Endpoint(getEndpoint());
+
+        final Request request = new Request(Method.POST, commitEndpointUrl);
+        Response response = null;
+
+        try {
+            response = getProductService().handle(request);
+            if (!response.getStatus().equals(Status.SUCCESS_OK)) {
+                throw new IOException("Failed to send commit with status " + response.getStatus() + " " + errorResponseToString(response.getEntity()));
+            }
+        } finally {
+            if (response != null) {
+                response.release();
+            }
+            if (request != null) {
+                request.release();
+            }
+        }
+    }
+
     /**
      * Return a list of required fields when transforming a repository item to JSON.
      * <p/>
@@ -170,5 +212,4 @@ public class CategoryFeed extends BaseRestFeed {
     public void setFeedLocaleService(FeedLocaleService feedLocaleService) {
         this.feedLocaleService = feedLocaleService;
     }
-    
 }

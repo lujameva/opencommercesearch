@@ -30,7 +30,8 @@ object ApplicationBuild extends Build {
     "org.apache.solr" % "solr-core" % "4.6.1" excludeAll(
       ExclusionRule(organization = "log4j"),
       ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
-    )
+    ),
+    "org.apache.curator" % "curator-framework" % "2.6.0"
   )
 
   val main = play.Project(appName, appVersion, appDependencies, settings = s).settings(

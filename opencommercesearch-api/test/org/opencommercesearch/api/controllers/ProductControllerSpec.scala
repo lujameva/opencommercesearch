@@ -101,6 +101,7 @@ class ProductControllerSpec extends BaseSpec {
 
         product.id = Some(expectedId)
         product.title = Some(expectedTitle)
+        product.categories = Some(Seq(new Category(Some("someCategory"))))
 
         val expectedSku = Sku.getInstance()
         expectedSku.id = Some("PRD1000-BLK-ONESIZE")
@@ -520,7 +521,7 @@ class ProductControllerSpec extends BaseSpec {
 
     "send 201 when trying to bulk create POOS products with missing sku fields" in new Products {
       running(FakeApplication(additionalConfiguration = Map("index.product.batchsize.max" -> 2))) {
-        val (updateResponse) = setupUpdate
+        setupUpdate
         val (expectedId, expectedTitle) = ("PRD0001", "A Product")
         val jsonBrand = Json.obj("id" -> "1000")
         val json = Json.obj(
@@ -714,7 +715,6 @@ class ProductControllerSpec extends BaseSpec {
 
   /**
    * Helper method to validate search parameters
-   * @param productQuery
    */
   def validateSearchParams(productQuery: SolrQuery) {
     productQuery.getQuery must beEqualTo("term")
@@ -807,17 +807,17 @@ class ProductControllerSpec extends BaseSpec {
    */
   protected def setupAncestorCategoryQuery() = {
     val queryResponse = mock[QueryResponse]
-    val solrDocument = mock[SolrDocument]
 
     val categoryValues = new java.util.ArrayList[AnyRef]()
     categoryValues.add("someCategory")
 
-    solrDocument.getFieldValues("ancestorCategoryId") returns categoryValues
-    solrDocument.containsKey("ancestorCategoryId") returns true
+    val facetField = new FacetField("ancestorCategoryId")
+    facetField.add("someCategory", 5)
 
-    val solrDocuments = new SolrDocumentList
-    solrDocuments.add(solrDocument)
-    queryResponse.getResults returns solrDocuments
+    val facetFields = new util.ArrayList[FacetField]()
+    facetFields.add(facetField)
+
+    queryResponse.getFacetFields returns facetFields
 
     queryResponse
   }

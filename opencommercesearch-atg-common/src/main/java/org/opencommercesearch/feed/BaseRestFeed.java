@@ -114,9 +114,9 @@ public abstract class BaseRestFeed extends GenericService {
      */
     private boolean transactional = true;
 
-    private ProductService productService;
+    protected ProductService productService;
 
-    private String endpointUrl;
+    protected String endpointUrl;
 
     private Map<String, String> customPropertyMappings;
 
@@ -538,7 +538,7 @@ public abstract class BaseRestFeed extends GenericService {
      * Sends a delete by query request to the API.
      * @throws IOException if the delete fails.
      */
-    private void sendDeleteByQuery() throws IOException {
+    protected void sendDeleteByQuery() throws IOException {
         String deleteEndpointUrl = endpointUrl;
         deleteEndpointUrl += (getProductService().getPreview())? "&" : "?";
         deleteEndpointUrl += "query=*:*";
@@ -561,7 +561,7 @@ public abstract class BaseRestFeed extends GenericService {
         }
     }
 
-    public void sendDelete(long feedTimestamp) {
+    protected void sendDelete(long feedTimestamp) {
         String deleteEndpointUrl = endpointUrl;
         deleteEndpointUrl += (getProductService().getPreview())? "&" : "?";
         deleteEndpointUrl += "feedTimestamp=" + feedTimestamp;
@@ -614,7 +614,7 @@ public abstract class BaseRestFeed extends GenericService {
      * @param representation The restlet representation of the error response.
      * @return A printable string containing the HTTP (restlet) error response.
      */
-    private String errorResponseToString(Representation representation) {
+    protected String errorResponseToString(Representation representation) {
         String message = "unknown exception";
         try {
             String text = null;

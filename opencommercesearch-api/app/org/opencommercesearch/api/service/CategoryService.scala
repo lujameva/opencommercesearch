@@ -25,24 +25,25 @@ import play.api.cache.Cache
 import play.api.libs.concurrent.Execution.Implicits._
 import play.modules.statsd.api.Statsd
 
-import scala.Some
 import scala.collection.mutable
 import scala.collection.JavaConversions._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
+import java.nio.ByteBuffer
 import java.util
 
-import org.opencommercesearch.api.{ProductFacetQuery, SingleProductQuery}
+import org.opencommercesearch.api.{SingleCategoryQuery, ProductFacetQuery}
 import org.opencommercesearch.api.Global._
 import org.opencommercesearch.api.common.{ContentPreview, FieldList}
 import org.opencommercesearch.api.models.{Category, Product}
 import org.opencommercesearch.common.Context
 
 import org.apache.commons.lang3.StringUtils
+import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
+import org.apache.curator.retry.ExponentialBackoffRetry
 import org.apache.solr.client.solrj.{AsyncSolrServer, SolrQuery}
 import org.apache.solr.common.SolrInputDocument
-
 import com.mongodb.WriteResult
 
 object CategoryService {
@@ -424,7 +425,7 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
   private def withParents(category: Category, fields: Seq[String], taxonomy: Taxonomy) : Category = {
     def copyParents(parentCategories: Seq[Category]) = parentCategories map {
       parentCategory => {
-        val category = taxonomy.get(parentCategory.getId).getOrElse(parentCategory)
+        val category = taxonomy.getOrElse(parentCategory.getId, parentCategory)
         val categoryCopy = Category.copyCategory(category, fields, Seq("childCategories"))
         categoryCopy.parentCategories = getParents(categoryCopy)
         categoryCopy
@@ -451,19 +452,21 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
   }
 
   /**
-   * Builds the taxonomy for all existing categories.
+   * Builds the taxonomy graph for all existing categories.
    * <p/>
-   * This method will first try to find a cached version of the taxonomy. Only if not present the entire taxonomy is computed.
+   * This method will first try to find a cached version of the taxonomy. Only if not present or cache=false the entire taxonomy is computed.
    * <p/>
    * By default, all available category fields are loaded.
    * @param storage Storage used to look for category data.
+   * @param preview Whether or not the taxonomy graph should be calculated for preview.
    * @return Map of all existing category ids referencing their corresponding category data. Elements on the map are related to each other based on their taxonomy data.
    */
-  def getTaxonomy(storage : Storage[WriteResult], preview : Boolean = false) : Future[Taxonomy] =  {
+  def getTaxonomy(storage : Storage[WriteResult], preview : Boolean = false, cache : Boolean = true) : Future[Taxonomy] =  {
     //If returning complete taxonomy, see if we already have it on cache.
     val taxonomyCacheKey = TaxonomyCacheKey + getPreviewKeyPrefix(preview)
     val cachedTaxonomy = Cache.get(taxonomyCacheKey)
-    if(cachedTaxonomy.isEmpty) {
+
+    if(cachedTaxonomy.isEmpty || cache) {
       Logger.debug("Generating taxonomy graph")
       //Go to storage and get all existing categories. Then calculate taxonomy from them.
       val startTime = System.currentTimeMillis()
@@ -503,11 +506,11 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
       if(isRoot(category)) {
         //Find out if there are catalog assignments
         for(sites <- category.sites) {
-          if(!sites.isEmpty) {
+          if(sites.nonEmpty) {
             val site = category.sites.get(0)
             if(result.contains(site)) {
               Logger.error(s"Found a duplicate root category node. Previous id was ${category.getId}, new id is $key. Assuming the first one found is correct, however " +
-                s"this is an indicator of taxonomy issues on storage.")
+                s"this is an indicator of taxonomy graph issues on storage.")
             }
             else {
               result += (site -> category)
@@ -548,6 +551,7 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
    */
   private def buildTaxonomyGraph(categoryFuture: Future[Iterable[Category]], includeParents: Boolean = true, filterCategories: Set[String] = Set.empty) : Future[Taxonomy] =  {
     categoryFuture map { categories =>
+
       def cleanParents(category: Category) = {
         if (!includeParents) {
           category.parentCategories = None
@@ -666,43 +670,144 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
 
   /**
    * Return the product taxonomy.
-   * @param id is the product id
+   * @param categories is the product categories
    * @param site is the site to limit the results. If null, all sites are included
    * @param fields is the category field list
    * @param context is the request context
    * @return a sequence of the root categories
    */
-  def getProductTaxonomy(id: String, site: String, fields: Seq[String])(implicit context: Context): Future[Seq[Category]] = {
+  def getProductTaxonomy(categories: Seq[Category], site: String, fields: Seq[String])(implicit context: Context): Future[Seq[Category]] = {
     val startTime = System.currentTimeMillis()
-    val productQuery = new SingleProductQuery(id, site)
-      .withFields("ancestorCategoryId")
+    val ids = categories map { category => category.getId }
+    val categoryQuery = new SingleCategoryQuery(ids, site).withFaceting()
 
-    Logger.debug(s"Getting taxonomy for product $id with query ${productQuery.toString}")
+    Logger.debug(s"Getting taxonomy for product $ids with query ${categoryQuery.toString}")
 
-    solrServer.query(productQuery) flatMap { response =>
-      val storage = withNamespace(storageFactory)
-      getTaxonomy(storage, context.isPreview) map { taxonomy =>
-        val docs = response.getResults
-        var rootCategories = Seq.empty[Category]
+    solrServer.query(categoryQuery) flatMap { response =>
+      val facetFields = response.getFacetFields
 
-        if (docs != null && docs.size() > 0) {
-          val doc = docs.get(0)
-          if (doc.containsKey("ancestorCategoryId")) {
-            val categoryIds = doc.getFieldValues("ancestorCategoryId").asInstanceOf[java.util.Collection[String]].toSet
-            Logger.debug(s"Got ${categoryIds.size} category ids for brand $id")
-            Logger.debug(s"Category ids for brand $id are $categoryIds")
-            val sites = if (site == null) findSites(categoryIds, taxonomy) else Set(site)
+      if(facetFields != null && facetFields.length == 1) {
+        Future.sequence(facetFields map { facetField =>
+          if ("ancestorcategoryid".equals(facetField.getName.toLowerCase)) {
+            val storage = withNamespace(storageFactory)
 
-            rootCategories = getRoots(taxonomy, sites, updateFields(fields), categoryIds)
+            if (facetField.getValueCount > 0) {
+              val categoryIds = facetField.getValues.map(facetValue => {
+                facetValue.getName
+              }).toSet
+
+              getTaxonomy(storage, context.isPreview) map { taxonomy =>
+                Logger.debug(s"Got ${categoryIds.size} ancestor category ids for $ids")
+                Logger.debug(s"Category ids for $ids are $categoryIds")
+                val sites = if (site == null) findSites(categoryIds, taxonomy) else Set(site)
+
+                val rootCategories = getRoots(taxonomy, sites, updateFields(fields), categoryIds)
+
+                Statsd.timing(StatsdBuildProductTaxonomyGraphMetric, System.currentTimeMillis() - startTime)
+                rootCategories
+              }
+            } else {
+              Logger.debug(s"Cannot retrieve ancestor categories for product with category ids $ids for site $site")
+              Future(Seq.empty[Category])
+            }
           } else {
-            Logger.debug(s"Cannot retrieve category paths for product $id for site $site")
+            Logger.debug(s"Ancestor categories for product with category ids $ids not found for site $site")
+            Future(Seq.empty[Category])
           }
-        } else {
-          Logger.debug(s"Category paths for product $id not found for site $site")
+        }) map { result =>
+          result(0)
         }
-        Statsd.timing(StatsdBuildProductTaxonomyGraphMetric, System.currentTimeMillis() - startTime)
-        rootCategories
+      } else {
+        Logger.debug(s"Ancestor categories for product with category ids $ids not found for site $site (incorrect number of facets found)")
+        Future(Seq.empty[Category])
       }
     }
+  }
+
+  def writeTaxonomyTimestamp() (implicit context: Context): Future[Boolean] = {
+    val zkHost = getConfig("zkHost", "localhost:2181")
+    val retryPolicy = new ExponentialBackoffRetry(1000, 3)
+    val client = CuratorFrameworkFactory.newClient(zkHost, retryPolicy)
+    val zkPath = getZkTaxonomyPath(context.isPreview)
+
+    Future(
+      try {
+        client.start()
+
+        if(client.checkExists().forPath(zkPath) == null) {
+          Logger.debug(s"Creating taxonomy timestamp node")
+          client.create().creatingParentsIfNeeded().forPath(zkPath)
+        }
+
+        //Write to ZK
+        val bytes = ByteBuffer.allocate(8).putLong(System.currentTimeMillis()).array()
+        client.setData().forPath(zkPath, bytes)
+        client.close()
+        Logger.debug(s"Taxonomy timestamp updated on $zkPath")
+        true
+      } catch {
+        case e: Exception =>
+          Logger.error(s"Failed to save taxonomy timestamp update to ZK on $zkPath", e)
+          false
+      }
+    )
+  }
+
+  /**
+   * Gets the Zookeeper path to the taxonomy timestamp
+   * @param preview Whether or not the preview graph should be used
+   * @return The path to the taxonomy graph in Zookeeper
+   */
+  private def getZkTaxonomyPath(preview: Boolean) : String = {
+    s"/taxonomy/graph${if(preview) "Preview" else "Public"}"
+  }
+
+  /**
+   * Loads the taxonomy if there is an update in ZK data. Flushes existing taxonomy cache.
+   * @return The new taxonomy timestamp if any.
+   */
+  def loadTaxonomyTimestamp(timestamp : Option[Long]) (implicit context: Context) : Future[Option[Long]] = {
+    val zkHost = getConfig("zkHost", "localhost:2181")
+
+    //Read taxonomy from ZK
+    val client : CuratorFramework = null
+    val zkPath = getZkTaxonomyPath(context.isPreview)
+
+    Future(
+    try {
+        Logger.debug(s"Checking if taxonomy needs to be reloaded based on ZK timestamp $zkPath")
+        val retryPolicy = new ExponentialBackoffRetry(1000, 3)
+        val client = CuratorFrameworkFactory.newClient(zkHost, retryPolicy)
+        client.start()
+
+        if(client.checkExists().forPath(zkPath) != null) {
+          //Read from ZK
+          val storage = withNamespace(storageFactory)
+          val bytes = client.getData.forPath(zkPath)
+          val newTimestamp = ByteBuffer.wrap(bytes).getLong
+
+          if(timestamp.isEmpty || timestamp.get < newTimestamp) {
+            Logger.debug(s"Loading taxonomy because timestamp $newTimestamp is newer than $timestamp at $zkPath")
+            getTaxonomy(storage, context.isPreview, cache = false)
+            Some(newTimestamp)
+          }
+          else {
+            Logger.debug(s"Got the latest copy already, nothing to load from $zkPath")
+            None
+          }
+        } else {
+          Logger.error(s"Taxonomy timestamp not found on ZK path $zkPath")
+          None
+        }
+      } catch {
+        case e: Exception =>
+          Logger.error(s"Failed to load taxonomy timestamp from ZK at $zkPath", e)
+          None
+      } finally {
+        if(client != null) {
+          client.close()
+        }
+      }
+    )
   }
 }

@@ -26,6 +26,8 @@ import play.api.test.Helpers._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 
+import java.util
+
 import org.opencommercesearch.api.Global._
 import org.opencommercesearch.api.models.Category
 import org.opencommercesearch.api.service.{MongoStorage, MongoStorageFactory}
@@ -204,6 +206,7 @@ class CategoryControllerSpec extends BaseSpec {
     "send 400 when trying to bulk create categories with missing fields" in new Categories {
       running(FakeApplication(additionalConfiguration = Map("categories.maxUpdateBatchSize" -> 2))) {
         val (updateResponse) = setupUpdate
+
         val (expectedId, expectedName, expectedIsRuleBased) = ("1000", "A Category", false)
         val json = Json.obj(
           "feedTimestamp" -> 1001,
@@ -227,7 +230,7 @@ class CategoryControllerSpec extends BaseSpec {
       }
     }
 
-    "send 201 when a categories are created" in new Categories {
+    "send 201 when categories are created" in new Categories {
       running(FakeApplication()) {
         val (queryResponse, _) = setupQuery
 

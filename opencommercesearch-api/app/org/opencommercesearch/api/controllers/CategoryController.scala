@@ -23,6 +23,8 @@ import play.api.Logger
 import play.api.libs.concurrent.Execution.Implicits._
 import play.api.libs.json.{JsError, Json}
 import play.api.mvc._
+import play.i18n.Lang
+import play.libs.Akka
 
 import scala.collection.JavaConversions._
 import scala.collection.convert.Wrappers.JIterableWrapper
@@ -35,18 +37,42 @@ import org.opencommercesearch.api.Global._
 import org.opencommercesearch.api.common.FacetQuery
 import org.opencommercesearch.api.models.{Brand, Category, CategoryList}
 import org.opencommercesearch.api.service.CategoryService
+import org.opencommercesearch.common.Context
 import org.opencommercesearch.search.suggester.IndexableElement
 
 import org.apache.commons.lang3.StringUtils
-import org.apache.solr.client.solrj.SolrQuery
 import org.apache.solr.client.solrj.request.AsyncUpdateRequest
 
+import akka.actor.{Actor, Props}
 import com.wordnik.swagger.annotations._
 
 @Api(value = "categories", basePath = "/api-docs/categories", description = "Category API endpoints")
 object CategoryController extends BaseController with FacetQuery {
 
   val categoryService = new CategoryService(solrServer, storageFactory)
+  var lastTaxonomyChange : Option[Long] = None
+
+  //Actor that checks if the taxonomy timestamp has changed on Zookeeper. Usually, after a category feed such timestamp is updated.
+  val taxonomyCheckActor = Akka.system.actorOf(
+    Props(
+      new Actor {
+        def receive = {
+          case _ =>
+            Logger.info("Check for taxonomy timestamp changes")
+            def loadTaxonomy(implicit context: Context) = {
+              categoryService.loadTaxonomyTimestamp(lastTaxonomyChange) map { timestamp =>
+              timestamp foreach { value =>
+                lastTaxonomyChange = timestamp
+                Logger.info(s"Loaded taxonomy timestamp changes")
+              }
+            }}
+
+            val previewContext = Context(preview = true, Lang.forCode("en-US")) //TODO: select proper language here
+            loadTaxonomy(previewContext)
+            val publicContext = Context(preview = false, Lang.forCode("en-US")) //TODO: select proper language here
+            loadTaxonomy(publicContext)
+        }
+    }))
 
   @ApiOperation(value = "Searches categories", notes = "Returns category information for a given category", response = classOf[Category], httpMethod = "GET")
   @ApiResponses(value = Array(new ApiResponse(code = 404, message = "Category not found")))
@@ -264,14 +290,7 @@ object CategoryController extends BaseController with FacetQuery {
       @QueryParam("feedTimestamp")
       feedTimestamp: Long) = ContextAction.async { implicit context => implicit request =>
 
-    val update = withCategoryCollection(new AsyncUpdateRequest())
-    update.deleteByQuery("-feedTimestamp:" + feedTimestamp)
-
-    val future: Future[SimpleResult] = update.process(solrServer).map( response => {
-      NoContent
-    })
-
-    withErrorHandling(future, s"Cannot delete categories before feed timestamp [$feedTimestamp]")
+      Future(Ok)
   }
 
   @ApiOperation(value = "Suggests categories", notes = "Returns category suggestions for given partial category name", response = classOf[Category], httpMethod = "GET")
@@ -290,7 +309,6 @@ object CategoryController extends BaseController with FacetQuery {
       @ApiParam(value = "Site to search", required = true)
       @QueryParam("site")
       site: String) = ContextAction.async { implicit context => implicit request =>
-    val solrQuery = withCategoryCollection(new SolrQuery(query))
     findSuggestionsFor("category", query, site)
   }
 
@@ -356,6 +374,22 @@ object CategoryController extends BaseController with FacetQuery {
         )))
       } 
     })
+  }
+
+  @ApiOperation(value = "Update taxonomy graph", notes = "After a feed is run, call to re-generate the taxonomy graph", httpMethod = "POST")
+  @ApiResponses(value = Array(new ApiResponse(code = 500, message = "Failed to persist category graph or an unexpected error")))
+  @ApiImplicitParams(value = Array(
+    new ApiImplicitParam(name = "preview", value = "Display preview results", defaultValue = "false", required = false, dataType = "boolean", paramType = "query")
+  ))
+  def updateTaxonomyTimestamp(version: Int) = ContextAction.async { implicit context => implicit request =>
+    categoryService.writeTaxonomyTimestamp() map { result =>
+      if(result) {
+        Ok
+      }
+      else {
+        InternalServerError
+      }
+    }
   }
 }
  

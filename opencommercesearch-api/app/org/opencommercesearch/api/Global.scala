@@ -24,11 +24,15 @@ import play.api.libs.json.Json
 import play.api.mvc.{RequestHeader, WithFilters}
 import play.api.mvc.Results._
 import play.filters.gzip.GzipFilter
+import play.libs.Akka
 import play.modules.statsd.api.StatsdFilter
 
 import scala.collection.JavaConversions._
 import scala.concurrent.Future
+import scala.concurrent.duration.DurationInt
+import scala.concurrent.ExecutionContext.Implicits.global
 
+import org.opencommercesearch.api.controllers.CategoryController
 import org.opencommercesearch.api.models.Availability._
 import org.opencommercesearch.api.service.MongoStorageFactory
 import org.opencommercesearch.api.util.{BigDecimalConverter, CountryConverter}
@@ -36,6 +40,7 @@ import org.opencommercesearch.api.util.{BigDecimalConverter, CountryConverter}
 import org.apache.solr.client.solrj.AsyncSolrServer
 import org.apache.solr.client.solrj.impl.AsyncCloudSolrServer
 
+import akka.actor.Cancellable
 import com.wordnik.swagger.converter.ModelConverters
 
 object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLog) {
@@ -55,7 +60,7 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
   lazy val FacetPreviewCollection = getConfig("preview.collection.facet", "facetsPreview")
   lazy val FacetPublicCollection = getConfig("public.collection.facet", "facetsPublic") 
   lazy val SuggestCollection = getConfig("public.collection.suggest", "autocomplete")
-  lazy val CategoryCacheTtl = getConfig("category.cache.ttl", 60 * 10)
+  lazy val CategoryCacheTtl = getConfig("category.cache.ttl", 0) //Don't auto expire as it will be flushed by a background job (see taxonomy.stored.checkperiod)
   lazy val MaxPaginationLimit = getConfig("pagination.limit.max", 40)
   lazy val DefaultPaginationLimit = getConfig("pagination.limit.default", 10)
   lazy val MaxFacetPaginationLimit = getConfig("facet.pagination.limit.max", 5000)
@@ -67,6 +72,7 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
   // @todo evaluate using dependency injection, for the moment lets be pragmatic
   private var _solrServer: AsyncSolrServer = null
   private var _storageFactory: MongoStorageFactory = null
+  private var taxonomyCheckJob : Cancellable = null
 
   def solrServer = {
     if (_solrServer == null) {
@@ -96,11 +102,19 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
 
   override def onStart(app: Application) {
     Logger.info("OpenCommerceSearch API has started")
+
+    val taxonomyCheckFrequency = Play.current.configuration.getInt("taxonomy.stored.checkperiod").getOrElse(360000)
+    val taxonomyCheckEnabled = Play.current.configuration.getBoolean("taxonomy.stored.enabled").getOrElse(false)
+
+    if(taxonomyCheckEnabled) {
+      taxonomyCheckJob = Akka.system.scheduler.schedule(taxonomyCheckFrequency.millis, taxonomyCheckFrequency.millis, CategoryController.taxonomyCheckActor, "check")
+    }
   }
 
   override def onStop(app: Application) {
     Logger.info("OpenCommerceSearch API shutdown...")
     storageFactory.close
+    taxonomyCheckJob.cancel()
   }
 
   override def onError(request: RequestHeader, ex: Throwable) = {

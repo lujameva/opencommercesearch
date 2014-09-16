@@ -5,6 +5,7 @@ import java.net.URLDecoder
 import org.opencommercesearch.api.Global.{DefaultPaginationLimit, MaxPaginationLimit}
 import org.opencommercesearch.api.common.FilterQuery
 import org.opencommercesearch.api.Global._
+import org.opencommercesearch.api.models.Category
 import org.opencommercesearch.common.Context
 import org.apache.commons.lang3.StringUtils
 import org.apache.solr.client.solrj.SolrQuery
@@ -314,6 +315,54 @@ class SingleProductQuery(productId : String, site : String)(implicit context: Co
 
   def withFields(field: String*) : SingleProductQuery = {
     setFields(field:_*)
+    this
+  }
+}
+
+/**
+ * A query to retrieve a single category
+ *
+ * @param categoryIds is the category ids
+ * @param site is the site to search in
+ * @param context is the search context
+ */
+class SingleCategoryQuery(categoryIds: Seq[String], site : String)(implicit context: Context) extends SolrQuery("*:*") {
+  import Collection._
+
+  private def init() : Unit = {
+    setParam("collection", searchCollection.name(context.lang))
+
+    val query = new StringBuilder()
+
+    categoryIds foreach { id =>
+      query.append("ancestorCategoryId:")
+      query.append(id)
+      query.append(" OR ")
+    }
+
+    if(categoryIds.length > 0) {
+      query.setLength(query.length - 4)
+    }
+
+    setQuery(query.toString())
+    setRows(0)
+
+    if (site != null) {
+      addFilterQuery(s"categoryPath:$site")
+    }
+  }
+
+  init()
+
+  def withFaceting(field: String = "ancestorCategoryId", limit: Option[Int] = None) : SingleCategoryQuery = {
+    setFacet(true)
+    addFacetField(field)
+    setFacetMinCount(1)
+
+    limit foreach { l =>
+      setFacetLimit(l)
+    }
+
     this
   }
 }
