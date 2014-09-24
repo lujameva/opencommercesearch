@@ -32,15 +32,15 @@ import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
 
-import org.opencommercesearch.api.controllers.CategoryController
+import org.opencommercesearch.api.job.TaxonomyCheckActor
 import org.opencommercesearch.api.models.Availability._
-import org.opencommercesearch.api.service.MongoStorageFactory
+import org.opencommercesearch.api.service.{CategoryService, MongoStorageFactory}
 import org.opencommercesearch.api.util.{BigDecimalConverter, CountryConverter}
 
 import org.apache.solr.client.solrj.AsyncSolrServer
 import org.apache.solr.client.solrj.impl.AsyncCloudSolrServer
 
-import akka.actor.Cancellable
+import akka.actor.{Props, Cancellable}
 import com.wordnik.swagger.converter.ModelConverters
 
 object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLog) {
@@ -68,6 +68,7 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
   lazy val IndexOemProductsEnabled = getConfig("index.product.oem.enabled", default = false)
   lazy val ProductAvailabilityStatusSummary = availabilityStatusSummaryConfig
   lazy val SpellCheckMinimumMatch = getConfig("spellcheck.minimummatch", "2<-1 3<-2 5<80%")
+  lazy val zkHost = getConfig("zkHost", "localhost:2181")
 
   // @todo evaluate using dependency injection, for the moment lets be pragmatic
   private var _solrServer: AsyncSolrServer = null
@@ -76,7 +77,7 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
 
   def solrServer = {
     if (_solrServer == null) {
-      _solrServer = AsyncCloudSolrServer(getConfig("zkHost", "localhost:2181"))
+      _solrServer = AsyncCloudSolrServer(zkHost)
     }
     _solrServer
   }
@@ -93,6 +94,8 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
     _storageFactory
   }
 
+  def categoryService = new CategoryService(solrServer, storageFactory)
+
   def storageFactory_=(storageFactory: MongoStorageFactory) = { _storageFactory = storageFactory }
 
   override def beforeStart(app: Application): Unit = {
@@ -107,7 +110,8 @@ object Global extends WithFilters(new StatsdFilter(), new GzipFilter(), AccessLo
     val taxonomyCheckEnabled = Play.current.configuration.getBoolean("taxonomy.stored.enabled").getOrElse(false)
 
     if(taxonomyCheckEnabled) {
-      taxonomyCheckJob = Akka.system.scheduler.schedule(taxonomyCheckFrequency.millis, taxonomyCheckFrequency.millis, CategoryController.taxonomyCheckActor, "check")
+      val actor = Akka.system.actorOf(Props(new TaxonomyCheckActor(categoryService)))
+      taxonomyCheckJob = Akka.system.scheduler.schedule(taxonomyCheckFrequency.millis, taxonomyCheckFrequency.millis, actor, "check")
     }
   }
 

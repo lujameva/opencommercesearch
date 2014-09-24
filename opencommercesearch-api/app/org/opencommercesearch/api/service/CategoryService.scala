@@ -33,14 +33,14 @@ import scala.concurrent.duration._
 import java.nio.ByteBuffer
 import java.util
 
-import org.opencommercesearch.api.{SingleCategoryQuery, ProductFacetQuery}
+import org.opencommercesearch.api.ProductFacetQuery
 import org.opencommercesearch.api.Global._
 import org.opencommercesearch.api.common.{ContentPreview, FieldList}
 import org.opencommercesearch.api.models.{Category, Product}
 import org.opencommercesearch.common.Context
 
 import org.apache.commons.lang3.StringUtils
-import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
+import org.apache.curator.framework.CuratorFrameworkFactory
 import org.apache.curator.retry.ExponentialBackoffRetry
 import org.apache.solr.client.solrj.{AsyncSolrServer, SolrQuery}
 import org.apache.solr.common.SolrInputDocument
@@ -454,19 +454,20 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
   /**
    * Builds the taxonomy graph for all existing categories.
    * <p/>
-   * This method will first try to find a cached version of the taxonomy. Only if not present or cache=false the entire taxonomy is computed.
+   * This method will first try to find a cached version of the taxonomy. Only if not present or skipCache=false the entire taxonomy is computed.
    * <p/>
    * By default, all available category fields are loaded.
    * @param storage Storage used to look for category data.
    * @param preview Whether or not the taxonomy graph should be calculated for preview.
+   * @param skipCache Whether or not the cache should be skipped.
    * @return Map of all existing category ids referencing their corresponding category data. Elements on the map are related to each other based on their taxonomy data.
    */
-  def getTaxonomy(storage : Storage[WriteResult], preview : Boolean = false, cache : Boolean = true) : Future[Taxonomy] =  {
+  def getTaxonomy(storage : Storage[WriteResult], preview : Boolean = false, skipCache : Boolean = true) : Future[Taxonomy] =  {
     //If returning complete taxonomy, see if we already have it on cache.
     val taxonomyCacheKey = TaxonomyCacheKey + getPreviewKeyPrefix(preview)
     val cachedTaxonomy = Cache.get(taxonomyCacheKey)
 
-    if(cachedTaxonomy.isEmpty || cache) {
+    if(cachedTaxonomy.isEmpty || skipCache) {
       Logger.debug("Generating taxonomy graph")
       //Go to storage and get all existing categories. Then calculate taxonomy from them.
       val startTime = System.currentTimeMillis()
@@ -659,7 +660,7 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
   private def findSites(categoryIds: Set[String], taxonomy: Taxonomy) = {
     var sites = Set[String]()
     categoryIds foreach { categoryId =>
-      taxonomy get categoryId filter { category => isRoot(category) } map { category =>
+      taxonomy get categoryId map { category =>
         category.sites map { categorySites =>
           sites = sites ++ categorySites
         }
@@ -678,54 +679,22 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
    */
   def getProductTaxonomy(categories: Seq[Category], site: String, fields: Seq[String])(implicit context: Context): Future[Seq[Category]] = {
     val startTime = System.currentTimeMillis()
-    val ids = categories map { category => category.getId }
-    val categoryQuery = new SingleCategoryQuery(ids, site).withFaceting()
+    val ids = categories.map({ category => category.getId }).toSet
+    Logger.debug(s"Category ids are $ids")
 
-    Logger.debug(s"Getting taxonomy for product $ids with query ${categoryQuery.toString}")
+    val storage = withNamespace(storageFactory)
 
-    solrServer.query(categoryQuery) flatMap { response =>
-      val facetFields = response.getFacetFields
+    getTaxonomy(storage, context.isPreview) map { taxonomy =>
+      val sites = if (site == null) findSites(ids, taxonomy) else Set(site)
 
-      if(facetFields != null && facetFields.length == 1) {
-        Future.sequence(facetFields map { facetField =>
-          if ("ancestorcategoryid".equals(facetField.getName.toLowerCase)) {
-            val storage = withNamespace(storageFactory)
+      val rootCategories = getRoots(taxonomy, sites, updateFields(fields), ids)
 
-            if (facetField.getValueCount > 0) {
-              val categoryIds = facetField.getValues.map(facetValue => {
-                facetValue.getName
-              }).toSet
-
-              getTaxonomy(storage, context.isPreview) map { taxonomy =>
-                Logger.debug(s"Got ${categoryIds.size} ancestor category ids for $ids")
-                Logger.debug(s"Category ids for $ids are $categoryIds")
-                val sites = if (site == null) findSites(categoryIds, taxonomy) else Set(site)
-
-                val rootCategories = getRoots(taxonomy, sites, updateFields(fields), categoryIds)
-
-                Statsd.timing(StatsdBuildProductTaxonomyGraphMetric, System.currentTimeMillis() - startTime)
-                rootCategories
-              }
-            } else {
-              Logger.debug(s"Cannot retrieve ancestor categories for product with category ids $ids for site $site")
-              Future(Seq.empty[Category])
-            }
-          } else {
-            Logger.debug(s"Ancestor categories for product with category ids $ids not found for site $site")
-            Future(Seq.empty[Category])
-          }
-        }) map { result =>
-          result(0)
-        }
-      } else {
-        Logger.debug(s"Ancestor categories for product with category ids $ids not found for site $site (incorrect number of facets found)")
-        Future(Seq.empty[Category])
-      }
+      Statsd.timing(StatsdBuildProductTaxonomyGraphMetric, System.currentTimeMillis() - startTime)
+      rootCategories
     }
   }
 
   def writeTaxonomyTimestamp() (implicit context: Context): Future[Boolean] = {
-    val zkHost = getConfig("zkHost", "localhost:2181")
     val retryPolicy = new ExponentialBackoffRetry(1000, 3)
     val client = CuratorFrameworkFactory.newClient(zkHost, retryPolicy)
     val zkPath = getZkTaxonomyPath(context.isPreview)
@@ -767,17 +736,14 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
    * @return The new taxonomy timestamp if any.
    */
   def loadTaxonomyTimestamp(timestamp : Option[Long]) (implicit context: Context) : Future[Option[Long]] = {
-    val zkHost = getConfig("zkHost", "localhost:2181")
-
     //Read taxonomy from ZK
-    val client : CuratorFramework = null
+    val retryPolicy = new ExponentialBackoffRetry(1000, 3)
+    val client = CuratorFrameworkFactory.newClient(zkHost, retryPolicy)
     val zkPath = getZkTaxonomyPath(context.isPreview)
 
     Future(
     try {
         Logger.debug(s"Checking if taxonomy needs to be reloaded based on ZK timestamp $zkPath")
-        val retryPolicy = new ExponentialBackoffRetry(1000, 3)
-        val client = CuratorFrameworkFactory.newClient(zkHost, retryPolicy)
         client.start()
 
         if(client.checkExists().forPath(zkPath) != null) {
@@ -788,7 +754,7 @@ class CategoryService(var server: AsyncSolrServer, var storageFactory: MongoStor
 
           if(timestamp.isEmpty || timestamp.get < newTimestamp) {
             Logger.debug(s"Loading taxonomy because timestamp $newTimestamp is newer than $timestamp at $zkPath")
-            getTaxonomy(storage, context.isPreview, cache = false)
+            getTaxonomy(storage, context.isPreview, skipCache = false)
             Some(newTimestamp)
           }
           else {
